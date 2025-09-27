@@ -1,0 +1,124 @@
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, CallbackContext
+import random
+import threading
+import time
+
+# توكن البوت
+TOKEN = "8212795068:AAFjve8P_mWs3H4TB_T1EFiuOJDLPCbNfdY"
+
+# القنوات الإلزامية
+REQUIRED_CHANNELS = ["https://t.me/krebtooo", "@CatPleasant"]
+
+# بيانات المستخدمين
+users_balance_points = {}
+users_balance_usd = {}
+MIN_WITHDRAWAL = 150
+REFERRAL_BONUS = 2
+
+def is_subscribed(bot, user_id):
+    for channel in REQUIRED_CHANNELS:
+        try:
+            member = bot.get_chat_member(channel, user_id)
+            if member.status not in ['member', 'creator', 'administrator']:
+                return False
+        except:
+            return False
+    return True
+
+def start(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    args = context.args
+
+    if not is_subscribed(context.bot, chat_id):
+        channels_list = "\n".join(REQUIRED_CHANNELS)
+        update.message.reply_text(f"❌ يجب الاشتراك في القنوات التالية:\n{channels_list}")
+        return
+
+    if chat_id not in users_balance_points:
+        users_balance_points[chat_id] = 0
+        users_balance_usd[chat_id] = 0
+
+    if args:
+        ref_id = int(args[0])
+        if ref_id != chat_id:
+            if ref_id in users_balance_usd:
+                users_balance_usd[ref_id] += REFERRAL_BONUS
+                context.bot.send_message(chat_id=ref_id, text=f"✅ لديك إحالة جديدة! تم إضافة {REFERRAL_BONUS}$ إلى رصيدك.")
+
+    keyboard = [
+        [InlineKeyboardButton("اكسب نقاط 💰", callback_data='earn')],
+        [InlineKeyboardButton("عرض الرصيد 💵", callback_data='balance')],
+        [InlineKeyboardButton("احصل على رابط إحالة 🔗", callback_data='referral')],
+        [InlineKeyboardButton("سحب الأرباح 💸", callback_data='withdraw')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    update.message.reply_text(f"مرحبًا! رصيدك الحالي: {users_balance_points[chat_id]} نقطة | {users_balance_usd[chat_id]:.2f}$", reply_markup=reply_markup)
+
+def button(update: Update, context: CallbackContext):
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    query.answer()
+
+    if not is_subscribed(context.bot, chat_id):
+        channels_list = "\n".join(REQUIRED_CHANNELS)
+        query.edit_message_text(f"❌ يجب الاشتراك في القنوات التالية:\n{channels_list}")
+        return
+
+    if chat_id not in users_balance_points:
+        users_balance_points[chat_id] = 0
+        users_balance_usd[chat_id] = 0
+
+    if query.data == 'earn':
+        earned_points = random.randint(5, 20)
+        users_balance_points[chat_id] += earned_points
+        users_balance_usd[chat_id] += earned_points / 100
+        query.edit_message_text(text=f"لقد ربحت {earned_points} نقاط! رصيدك الآن: {users_balance_points[chat_id]} نقطة | {users_balance_usd[chat_id]:.2f}$")
+
+    elif query.data == 'balance':
+        query.edit_message_text(text=f"رصيدك الحالي: {users_balance_points[chat_id]} نقطة | {users_balance_usd[chat_id]:.2f}$")
+
+    elif query.data == 'referral':
+        ref_link = f"https://t.me/YOUR_BOT_USERNAME?start={chat_id}"
+        query.edit_message_text(text=f"شارك رابطك للحصول على إحالات بقيمة {REFERRAL_BONUS}$ لكل إحالة:\n{ref_link}")
+
+    elif query.data == 'withdraw':
+        balance = users_balance_usd[chat_id]
+        if balance < MIN_WITHDRAWAL:
+            query.edit_message_text(text=f"رصيدك {balance:.2f}$ أقل من الحد الأدنى للسحب ({MIN_WITHDRAWAL}$).")
+        else:
+            keyboard = [
+                [InlineKeyboardButton("شام كاش", callback_data='withdraw_sham')],
+                [InlineKeyboardButton("بينانس", callback_data='withdraw_binance')],
+                [InlineKeyboardButton("بايبال", callback_data='withdraw_paypal')],
+                [InlineKeyboardButton("البنك المركزي", callback_data='withdraw_bank')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            query.edit_message_text(f"اختر طريقة السحب. رصيدك: {balance:.2f}$", reply_markup=reply_markup)
+
+    elif query.data.startswith('withdraw_'):
+        method = query.data.split('_')[1]
+        balance = users_balance_usd[chat_id]
+        if balance >= MIN_WITHDRAWAL:
+            users_balance_usd[chat_id] = 0
+            query.edit_message_text(text=f"تم طلب السحب عبر {method.upper()} بمبلغ {balance:.2f}$. سيتم التواصل معك لإتمام العملية.")
+        else:
+            query.edit_message_text(text=f"رصيدك أقل من الحد الأدنى للسحب ({MIN_WITHDRAWAL}$).")
+
+def run_bot():
+    updater = Updater(TOKEN, use_context=True)
+    dispatcher = updater.dispatcher
+    dispatcher.add_handler(CommandHandler('start', start))
+    dispatcher.add_handler(CallbackQueryHandler(button))
+    updater.start_polling()
+    updater.idle()
+
+def keep_alive():
+    while True:
+        try:
+            run_bot()
+        except Exception as e:
+            print("حدث خطأ، إعادة التشغيل:", e)
+            time.sleep(5)
+
+threading.Thread(target=keep_alive).start()
